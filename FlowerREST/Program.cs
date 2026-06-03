@@ -1,20 +1,65 @@
 using FlowerREST;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
+// Add services to the container
 builder.Services.AddControllers();
 
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
 
-// Vi bruger Singleton, så hele applikationen bruger samme RepositoryFlowers-objekt.
-builder.Services.AddSingleton<RepositoryFlowers>();
+// Swagger + JWT Authorize-knap
+builder.Services.AddSwaggerGen(options =>
+{
+    options.SwaggerDoc("v1",
+        new OpenApiInfo
+        {
+            Title = "FlowerREST",
+            Version = "v1"
+        });
 
-// CORS: tillader frontend fra fx Live Server at kalde API'et.
+    options.AddSecurityDefinition("Bearer",
+        new OpenApiSecurityScheme
+        {
+            Name = "Authorization",
+            Type = SecuritySchemeType.ApiKey,
+            Scheme = "Bearer",
+            BearerFormat = "JWT",
+            In = ParameterLocation.Header,
+            Description = "Indtast: Bearer {dit token}"
+        });
+
+    options.AddSecurityRequirement(
+        new OpenApiSecurityRequirement
+        {
+            {
+                new OpenApiSecurityScheme
+                {
+                    Reference =
+                        new OpenApiReference
+                        {
+                            Type = ReferenceType.SecurityScheme,
+                            Id = "Bearer"
+                        }
+                },
+                Array.Empty<string>()
+            }
+        });
+});
+
+// Azure SQL Database / Entity Framework
+builder.Services.AddDbContext<FlowerDbContext>(options =>
+    options.UseSqlServer(
+        builder.Configuration.GetConnectionString("DefaultConnection")));
+
+// Repository bruger DbContext, derfor Scoped
+builder.Services.AddScoped<RepositoryFlowers>();
+
+// CORS: tillader frontend fra fx Live Server at kalde API'et
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll",
@@ -27,24 +72,15 @@ builder.Services.AddCors(options =>
 });
 
 // JWT authentication
-// AddJwtBearer gør at ASP.NET kan læse og validere JWT-token fra Authorization-headeren.
-// Token sendes typisk som: Authorization: Bearer <token>
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
         options.TokenValidationParameters =
             new TokenValidationParameters
             {
-                // Tjekker hvem der har udstedt tokenet
                 ValidateIssuer = true,
-
-                // Tjekker hvem tokenet er lavet til
                 ValidateAudience = true,
-
-                // Tjekker at tokenet ikke er udløbet
                 ValidateLifetime = true,
-
-                // Tjekker at tokenet er signeret med den rigtige secret key
                 ValidateIssuerSigningKey = true,
 
                 ValidIssuer = "FlowerREST",
@@ -53,7 +89,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 IssuerSigningKey =
                     new SymmetricSecurityKey(
                         Encoding.UTF8.GetBytes(
-"THIS_IS_A_LONG_SECRET_KEY_FOR_FLOWER_REST_JWT_123456789")
+                            "THIS_IS_A_LONG_SECRET_KEY_FOR_FLOWER_REST_JWT_123456789"
+                        )
                     )
             };
     });
@@ -63,7 +100,7 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
+// Swagger
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -72,10 +109,9 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-// CORS skal stå før authentication/authorization.
+// CORS skal stå før authentication/authorization
 app.UseCors("AllowAll");
 
-// VIGTIGT:
 // Authentication = hvem er du?
 // Authorization = hvad må du?
 app.UseAuthentication();
